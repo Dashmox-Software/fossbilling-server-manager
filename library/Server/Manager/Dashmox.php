@@ -179,7 +179,12 @@ class Server_Manager_Dashmox extends Server_Manager
                     'name' => $account->getDomain() ?: $account->getUsername(),
                     'domain' => $account->getDomain(),
                     'runtime' => 'php',
-                    'ssl' => true,
+                    // No certificate yet. Somebody ordering hosting usually
+                    // points the domain afterwards, and the panel refuses to
+                    // issue for a name that does not resolve to it, which would
+                    // fail the whole order. The panel's own sweep issues one as
+                    // soon as the name starts resolving here.
+                    'ssl' => false,
                 ]
             );
             // Recorded on the account so later operations address the panel by
