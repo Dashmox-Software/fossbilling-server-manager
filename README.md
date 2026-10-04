@@ -32,7 +32,11 @@ over a billing dispute. Terminating is the destructive one and says so.
   in the panel under **Server**, then **Integrations**.
 
 Grant the key these permissions: `customers.manage`, `sites.create`,
-`sites.view`, `sites.edit`, `sites.delete`, `server.view`. It reaches only the
+`sites.view`, `sites.edit`, `sites.delete`, `server.view`, `ssl.view`.
+
+`ssl.view` is only for the certificate card on the customer's page. Leave it off
+and everything else still works; the card then says what is missing rather than
+showing nothing, which is how it was found. It reaches only the
 routes that name a permission it holds, so nothing else is open to it whatever
 else you tick.
 
@@ -41,8 +45,9 @@ working when the administrator who made it leaves.
 
 ## Installing
 
-1. Copy the `library` folder into your FOSSBilling root, so the manager lands at
-   `library/Server/Manager/Dashmox.php`.
+1. Copy the `library` **and** `modules` folders into your FOSSBilling root, so
+   the manager lands at `library/Server/Manager/Dashmox.php` and the module at
+   `modules/Dashmox/`.
 2. In FOSSBilling go to **System**, then **Hosting plans**, then **Servers**, and
    add a server whose manager is **Dashmox**.
 3. Put your panel's address in the hostname field and the integration key in the
@@ -51,6 +56,34 @@ working when the administrator who made it leaves.
 
 Then point a hosting plan at that server and set its name to a hosting plan that
 exists on the panel.
+
+Finally go to **Extensions**, then **Overview**, and activate **Dashmox**. That
+is the module, and it is what gives your customers the page below.
+
+## The page your customer gets
+
+FOSSBilling asks a server manager for thirteen operations and never for a view,
+so the manager alone cannot show anybody anything. The module beside it adds one
+page, at `/dashmox/<order id>`, which reads the panel and shows:
+
+* **Whether the website is running**, or suspended, or still being built.
+* **Disk used**, split between files and databases, against the allowance.
+* **Transfer this month**, read from the website's own access log.
+* **The certificate**: covered, or the panel's own reason it is not yet.
+* **What it runs**: PHP and its version, Node.js, static files or a container.
+* **Its allowance**: CPU share and memory.
+
+Everything is read on your server with the server token, so the token never
+reaches a browser and your customer never talks to the panel. A customer who
+edits the order id in the address bar gets nothing: the lookup is by order id
+and their own client id together.
+
+Themes build their own menus, so nothing can add a link to yours automatically.
+One line in your theme's hosting page does it:
+
+```twig
+<a href="/dashmox/{{ order.id }}">{{ 'Your website'|trans }}</a>
+```
 
 ## What it cannot do, and why
 
@@ -83,6 +116,14 @@ with work still queued, and one already being removed. Both clear on their own.
 If the panel's licence lapses, every request for a key is refused and the manager
 says so as something for you to fix rather than as a credential problem. Nothing
 is deleted, and it works again once a licence is applied.
+
+## What is in here
+
+```
+library/Server/Manager/Dashmox.php   the server manager, and its own copy of the client
+modules/Dashmox/                     the module that draws the customer's page
+tests/                               two suites that need neither FOSSBilling nor a network
+```
 
 ## Tests
 

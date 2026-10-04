@@ -1,0 +1,185 @@
+{% extends request.ajax ? "layout_blank.html.twig" : "layout_default.html.twig" %}
+
+{% block meta_title %}{{ 'Your website'|trans }}{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <h1 class="h3 mb-4">{{ 'Your website'|trans }}</h1>
+
+    {% if not panel.available %}
+      <div class="card mb-4">
+        <div class="card-header"><h2>{{ 'Your website'|trans }}</h2></div>
+        <div class="card-body">
+          <p class="mb-0">{{ panel.problem }}</p>
+        </div>
+      </div>
+    {% else %}
+
+      {# The four things somebody actually opens this page to find out. #}
+      <div class="row mb-4">
+        <div class="col-sm-6 col-lg-3 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="text-muted small">{{ 'Website'|trans }}</div>
+              <div class="h4 mb-0">
+                {% if panel.site.status == 'ACTIVE' %}
+                  <span class="badge bg-success">{{ 'Running'|trans }}</span>
+                {% elseif panel.site.suspended %}
+                  <span class="badge bg-warning">{{ 'Suspended'|trans }}</span>
+                {% else %}
+                  <span class="badge bg-secondary">{{ panel.site.status }}</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-sm-6 col-lg-3 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="text-muted small">{{ 'Disk used'|trans }}</div>
+              {% if panel.storage %}
+                <div class="h4 mb-1">
+                  {%- if panel.storage.total_bytes < 1048576 -%}
+                    {{ (panel.storage.total_bytes / 1024)|number_format(1) }} KB
+                  {%- else -%}
+                    {{ (panel.storage.total_bytes / 1048576)|number_format(1) }} MB
+                  {%- endif -%}
+                </div>
+                {% if panel.storage.limit_bytes > 0 %}
+                  {% set pct = (panel.storage.total_bytes / panel.storage.limit_bytes * 100)|round %}
+                  <div class="progress" style="height:6px">
+                    <div class="progress-bar{{ pct > 90 ? ' bg-danger' : (pct > 75 ? ' bg-warning' : '') }}"
+                         style="width:{{ pct > 100 ? 100 : pct }}%"></div>
+                  </div>
+                  <div class="text-muted small mt-1">
+                    {{ 'of'|trans }} {{ (panel.storage.limit_bytes / 1073741824)|number_format(1) }} GB
+                  </div>
+                {% else %}
+                  <div class="text-muted small">
+                    {{ 'files'|trans }} {{ (panel.storage.files_bytes / 1024)|number_format(0) }} KB,
+                    {{ 'databases'|trans }} {{ (panel.storage.databases_bytes / 1024)|number_format(0) }} KB
+                  </div>
+                {% endif %}
+              {% else %}
+                <div class="text-muted">{{ 'Not available'|trans }}</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-sm-6 col-lg-3 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="text-muted small">{{ 'Transfer, 30 days'|trans }}</div>
+              {% if panel.bandwidth and panel.bandwidth.month is defined %}
+                <div class="h4 mb-0">
+                  {%- if panel.bandwidth.month.bytes_out < 1048576 -%}
+                    {{ (panel.bandwidth.month.bytes_out / 1024)|number_format(0) }} KB
+                  {%- else -%}
+                    {{ (panel.bandwidth.month.bytes_out / 1048576)|number_format(1) }} MB
+                  {%- endif -%}
+                </div>
+                <div class="text-muted small">
+                  {{ 'served since'|trans }} {{ panel.bandwidth.month_start|date('j M') }}
+                </div>
+              {% else %}
+                <div class="text-muted">{{ 'Not available'|trans }}</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-sm-6 col-lg-3 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <div class="text-muted small">{{ 'Certificate'|trans }}</div>
+              {% if panel.certificate and panel.certificate.issued %}
+                <div class="h4 mb-0">
+                  <span class="badge bg-success">{{ 'Secured'|trans }}</span>
+                </div>
+                <div class="text-muted small mt-1">
+                  {{ panel.certificate.ready|length }} {{ 'name(s) covered'|trans }}
+                </div>
+              {% else %}
+                <div class="h4 mb-0"><span class="badge bg-secondary">{{ 'Not yet'|trans }}</span></div>
+                <div class="text-muted small mt-1">
+                  {# The panel says why for each name, and the first reason is
+                     almost always the only one worth reading. #}
+                  {% if panel.certificate and panel.certificate.waiting|length %}
+                    {{ panel.certificate.waiting|first.reason }}
+                  {% else %}
+                    {{ 'One is issued once the domain points here.'|trans }}
+                  {% endif %}
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-4">
+        <div class="card-header"><h3 class="mb-0">{{ 'Details'|trans }}</h3></div>
+        <div class="card-body">
+          <table class="table table-sm table-striped mb-0">
+            <tbody>
+              <tr>
+                <td style="width:38%">{{ 'Domain'|trans }}</td>
+                <td><a href="https://{{ panel.domain }}" target="_blank" rel="noopener">{{ panel.domain }}</a></td>
+              </tr>
+              <tr>
+                <td>{{ 'Account'|trans }}</td>
+                <td><code>{{ panel.username }}</code></td>
+              </tr>
+              <tr>
+                <td>{{ 'Runs'|trans }}</td>
+                <td>
+                  {% if panel.site.runtime == 'php' %}
+                    PHP {{ panel.site.php_version }}
+                  {% elseif panel.site.runtime == 'node' %}
+                    Node.js {{ panel.site.node_version }}
+                  {% elseif panel.site.runtime == 'static' %}
+                    {{ 'Static files'|trans }}
+                  {% elseif panel.site.runtime == 'container' %}
+                    {{ 'A container'|trans }}
+                  {% else %}
+                    {{ panel.site.runtime }}
+                  {% endif %}
+                </td>
+              </tr>
+              {% if panel.site.memory_max_mb > 0 or panel.site.cpu_percent > 0 %}
+              <tr>
+                <td>{{ 'Allowance'|trans }}</td>
+                <td>
+                  {%- if panel.site.cpu_percent > 0 %}{{ panel.site.cpu_percent }}% {{ 'of a CPU'|trans }}{% endif -%}
+                  {%- if panel.site.cpu_percent > 0 and panel.site.memory_max_mb > 0 %}, {% endif -%}
+                  {%- if panel.site.memory_max_mb > 0 %}{{ panel.site.memory_max_mb }} MB {{ 'memory'|trans }}{% endif -%}
+                </td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# What could not be read, said rather than left as a blank card. #}
+      {% if panel.unreadable|length %}
+        <div class="card mb-4">
+          <div class="card-body">
+            <p class="text-muted mb-2">{{ 'Some readings could not be fetched just now:'|trans }}</p>
+            <ul class="mb-0 text-muted small">
+              {% for what, why in panel.unreadable %}<li>{{ what }}: {{ why }}</li>{% endfor %}
+            </ul>
+          </div>
+        </div>
+      {% endif %}
+
+    {% endif %}
+
+    {# A plain path. The |link filter does not exist in FOSSBilling 0.8, and an
+       unknown filter is a 500 on the whole page rather than a broken link. #}
+    <p><a href="/order/service/manage/{{ order_id }}">{{ 'Back to this service'|trans }}</a></p>
+  </div>
+</div>
+{% endblock %}

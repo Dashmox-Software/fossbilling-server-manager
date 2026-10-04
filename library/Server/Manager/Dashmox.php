@@ -218,7 +218,8 @@ class Server_Manager_Dashmox extends Server_Manager
 
     private function setSuspended(Server_Account $account, bool $suspended): bool
     {
-        $ids = $this->idsOf($account);
+        $panel = $this->panel();
+        $ids = $this->idsOf($account, $panel);
         if ($ids['customer_id'] === '') {
             throw new Server_Exception(
                 'This service has no :server_manager customer recorded, so there is nothing to change.',
@@ -227,7 +228,7 @@ class Server_Manager_Dashmox extends Server_Manager
             );
         }
         try {
-            $this->panel()->setCustomerSuspended($ids['customer_id'], $suspended);
+            $panel->setCustomerSuspended($ids['customer_id'], $suspended);
 
             return true;
         } catch (ApiError $e) {
@@ -259,7 +260,8 @@ class Server_Manager_Dashmox extends Server_Manager
      */
     public function terminateAccount(Server_Account $account): bool
     {
-        $ids = $this->idsOf($account);
+        $panel = $this->panel();
+        $ids = $this->idsOf($account, $panel);
         if ($ids['customer_id'] === '') {
             return true;
         }
@@ -292,7 +294,8 @@ class Server_Manager_Dashmox extends Server_Manager
 
     public function changeAccountPackage(Server_Account $account, Server_Package $package): bool
     {
-        $ids = $this->idsOf($account);
+        $panel = $this->panel();
+        $ids = $this->idsOf($account, $panel);
         if ($ids['customer_id'] === '') {
             throw new Server_Exception(
                 'This service has no :server_manager customer recorded, so its plan cannot be changed.',
@@ -318,12 +321,13 @@ class Server_Manager_Dashmox extends Server_Manager
      */
     public function synchronizeAccount(Server_Account $account): Server_Account
     {
-        $ids = $this->idsOf($account);
+        $panel = $this->panel();
+        $ids = $this->idsOf($account, $panel);
         if ($ids['customer_id'] === '') {
             return $account;
         }
         try {
-            $customer = $this->panel()->customer($ids['customer_id']);
+            $customer = $panel->customer($ids['customer_id']);
             if ($customer !== null && isset($customer['suspended'])) {
                 $account->setSuspended((bool) $customer['suspended']);
             }
@@ -423,13 +427,50 @@ class Server_Manager_Dashmox extends Server_Manager
         return 'dashmox customer=' . $customerId . ' site=' . $siteId;
     }
 
-    private function idsOf(Server_Account $account): array
+    /**
+     * The panel's ids for this account.
+     *
+     * Preferred from the note the creation wrote, and found by domain when
+     * there is none, which on FOSSBilling is always: `setNote()` sets a
+     * property on an object FOSSBilling discards. There is no `note` column on
+     * `service_hosting` and nothing reads one back, so for a long while every
+     * operation after provisioning found no ids and refused to do anything,
+     * politely. Suspending for non-payment did nothing and reported success.
+     *
+     * Looking it up by domain is exact rather than a guess. A domain is unique
+     * across a panel, `domains.name TEXT NOT NULL UNIQUE COLLATE NOCASE`, so at
+     * most one website can answer to it and the customer is whichever owns that
+     * website.
+     */
+    private function idsOf(Server_Account $account, ?Panel $panel = null): array
     {
-        $note = (string) ($account->getNote() ?? '');
         $ids = ['customer_id' => '', 'site_id' => ''];
-        if (preg_match('/dashmox customer=([A-Za-z0-9_-]*) site=([A-Za-z0-9_-]*)/', $note, $found)) {
+        $note = (string) ($account->getNote() ?? '');
+        if (preg_match('/dashmox customer=([A-Za-z0-9_-]*) site=([A-Za-z0-9_-]*)/', $note, $found)
+            && $found[1] !== '' && $found[2] !== '') {
             $ids['customer_id'] = $found[1];
             $ids['site_id'] = $found[2];
+
+            return $ids;
+        }
+
+        $domain = strtolower(trim((string) $account->getDomain()));
+        if ($domain === '' || $panel === null) {
+            return $ids;
+        }
+        try {
+            foreach ($panel->sites() as $site) {
+                if (strtolower((string) ($site['domain'] ?? '')) !== $domain) {
+                    continue;
+                }
+                $ids['site_id'] = (string) ($site['id'] ?? '');
+                $ids['customer_id'] = (string) ($site['customer_id'] ?? '');
+
+                return $ids;
+            }
+        } catch (ApiError $e) {
+            // Nothing found is nothing found. The caller says what that means
+            // for the operation it was about to do.
         }
 
         return $ids;

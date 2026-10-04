@@ -1,0 +1,10 @@
+{
+  "id": "dashmox",
+  "type": "mod",
+  "name": "Dashmox",
+  "description": "Shows a customer what their Dashmox website is doing: status, disk, transfer and certificate, read from the panel with the server token the Dashmox server manager already holds.",
+  "author": "Dashmox Software",
+  "author_url": "https://dashmox.com",
+  "version": "1.1.0",
+  "icon_url": "icon.svg"
+}
