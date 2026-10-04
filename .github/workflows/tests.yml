@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The versions a host is realistically running under its billing
+        # system. The module claims 8.1 and newer, so it is tested there.
+        php: ['8.1', '8.2', '8.3', '8.4']
+    name: PHP ${{ matrix.php }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Every file parses
+        run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Tests
+        run: |
+          php tests/client_test.php
+          php tests/fossbilling_test.php
