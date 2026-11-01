@@ -13,8 +13,13 @@
  * refuse rather than silently succeed) and nothing about whether FOSSBilling
  * loads it. The class and method signatures were taken from FOSSBilling's own
  * Server_Manager, Server_Account, Server_Package and Server_Client rather than
- * from memory, and the README says plainly that it has not been run inside
- * FOSSBilling.
+ * from memory.
+ *
+ * It has been run inside FOSSBilling since 2026-11-01: 0.8.9 on a real server,
+ * where it is listed as a manager, its connection test passes, and an order
+ * placed through it provisioned a website on a real panel. What that found is
+ * in the README under Proved on a real install, and no amount of fake transport
+ * would have found any of it.
  *
  *     php tests/fossbilling_test.php
  */
@@ -118,6 +123,51 @@ class Server_Account
 
 require_once __DIR__ . '/../library/Server/Manager/Dashmox.php';
 
+/**
+ * The manager with its network replaced.
+ *
+ * FOSSBilling builds a manager from a config array and nothing else, so there
+ * is nowhere to pass a transport in. The manager leaves a seam for exactly
+ * this, and this is what goes through it.
+ */
+class TestableManager extends Server_Manager_Dashmox
+{
+    /** @var callable */
+    private $fake;
+
+    public function __construct(array $config, callable $fake)
+    {
+        $this->fake = $fake;
+        parent::__construct($config);
+    }
+
+    protected function transport(): ?callable
+    {
+        return $this->fake;
+    }
+}
+
+/**
+ * A transport that records what it was asked and answers what it was told to.
+ *
+ * $answers is bound by reference deliberately. Bound by value, the closure gets
+ * the same copy back on every call, so array_shift never advances and every
+ * request is answered with the first response. That is not a test that fails,
+ * it is a test that passes while the second call reads the first call's body.
+ */
+function recorder(array $answers, array &$seen)
+{
+    return function ($method, $url, $body, $headers) use (&$answers, &$seen) {
+        $seen[] = ['method' => $method, 'url' => $url, 'body' => $body, 'headers' => $headers];
+        $next = array_shift($answers);
+        if ($next === null) {
+            return ['status' => 500, 'body' => '{"error":"the test ran out of answers"}'];
+        }
+
+        return $next;
+    };
+}
+
 $failures = 0;
 $ran = 0;
 
@@ -190,8 +240,71 @@ check('marked secret', $fields[0]['secret'], true);
 // ---------------------------------------------------------------------------
 $account = new Server_Account(['domain' => 'a.example.com']);
 
-checkRefuses('signing a customer in is refused, and says why',
-    fn () => $ok->getLoginUrl($account), 'one-time session');
+checkRefuses('an account with no domain is refused, because there is nowhere to go',
+    fn () => $ok->getLoginUrl(new Server_Account([])), 'no domain');
+
+// ---------------------------------------------------------------------------
+// "Jump to admin" asks the panel to sign the host in, and falls back to the
+// sign-in page when it cannot.
+//
+// Driven through the transport seam, so these never open a socket. Without it
+// this would connect to a hostname that does not exist, wait for that to fail,
+// and pass on the fallback: green, slow, and proving nothing about the call it
+// is here to test.
+// ---------------------------------------------------------------------------
+$seenSignon = [];
+$signingIn = new TestableManager(
+    ['host' => 'p.example.com', 'accesshash' => 'dashmox_abc'],
+    recorder([
+        // idsOf has no recorded note, so it finds the website by domain first.
+        ['status' => 200, 'body' => '[{"id":"s7","domain":"a.example.com","customer_id":"c7"}]'],
+        ['status' => 201, 'body' => '{"url":"https://p.example.com:8443/api/v1/sign-on?token=abc123","expires_in":90}'],
+    ], $seenSignon)
+);
+check('jumping to the panel returns the one-time sign-on link',
+    $signingIn->getLoginUrl($account),
+    'https://p.example.com:8443/api/v1/sign-on?token=abc123');
+// http, because this fixture's server has no secure flag set, which is what
+// the manager reads to choose the scheme.
+check('and it asked the website it found, by id',
+    $seenSignon[1]['url'], 'http://p.example.com:8443/api/v1/sites/s7/sign-on');
+check('and said where the request came from, for the panel audit log',
+    strpos((string) $seenSignon[1]['body'], 'FOSSBilling') !== false, true);
+
+// A panel older than the feature answers 404. Most panels will be, for a while.
+$seenOld = [];
+$oldPanel = new TestableManager(
+    ['host' => 'p.example.com', 'accesshash' => 'dashmox_abc'],
+    recorder([
+        ['status' => 200, 'body' => '[{"id":"s7","domain":"a.example.com","customer_id":"c7"}]'],
+        ['status' => 404, 'body' => '{"error":"not found"}'],
+    ], $seenOld)
+);
+check('a panel with no sign-on falls back to the sign-in page on that website',
+    $oldPanel->getLoginUrl($account), 'https://a.example.com/dashmox');
+
+// An integration key the operator did not give users.manage answers 403. That
+// is the operator's switch for this and theirs to turn on, so it is a
+// fallback rather than an error thrown at whoever pressed the button.
+$seenNoScope = [];
+$noScope = new TestableManager(
+    ['host' => 'p.example.com', 'accesshash' => 'dashmox_abc'],
+    recorder([
+        ['status' => 200, 'body' => '[{"id":"s7","domain":"a.example.com","customer_id":"c7"}]'],
+        ['status' => 403, 'body' => '{"error":"this token may not do that"}'],
+    ], $seenNoScope)
+);
+check('a key without users.manage falls back rather than failing',
+    $noScope->getLoginUrl($account), 'https://a.example.com/dashmox');
+
+// And a panel that cannot be reached at all. The sign-in page is served by the
+// website, so it is still a true answer when the panel's API is down.
+$unreachable = new TestableManager(
+    ['host' => 'p.example.com', 'accesshash' => 'dashmox_abc'],
+    function () { throw new \Dashmox\Whmcs\ApiError(0, 'could not connect'); }
+);
+check('a panel that cannot be reached still opens the sign-in page',
+    $unreachable->getLoginUrl($account), 'https://a.example.com/dashmox');
 
 checkRefuses('reseller sign-in is refused',
     fn () => $ok->getResellerLoginUrl($account), 'reseller');

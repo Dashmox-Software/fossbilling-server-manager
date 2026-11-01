@@ -9,7 +9,7 @@
  * objects. If the panel's API had been quietly designed around WHMCS, this is
  * where it would show, because nothing here could be bent to fit.
  *
- * What it showed is written down in the README and worth stating here too: five
+ * What it showed is written down in the README and worth stating here too: four
  * of the thirteen have no route behind them on a Dashmox panel, and that is a fact
  * about the panel rather than about FOSSBilling. They refuse by name, which is what a
  * server manager should do, because a method that silently does nothing is
@@ -101,8 +101,29 @@ class Server_Manager_Dashmox extends Server_Manager
         return new Panel(new Client(
             $scheme . '://' . $this->_config['host'] . ':' . $port,
             trim((string) $this->_config['accesshash']),
-            $verify
+            $verify,
+            30,
+            $this->transport()
         ));
+    }
+
+    /**
+     * How the client reaches the network, or null for the real way.
+     *
+     * A seam rather than a setter, because FOSSBilling builds a manager from a
+     * config array and nothing else: there is nowhere to pass a transport in.
+     * A test subclass overrides this, which is what lets the operations that
+     * talk to the panel be driven with canned answers instead of a socket.
+     *
+     * It earned its place immediately. "Jump to admin" asks the panel for a
+     * sign-on link now, so without this the test for it would open a connection
+     * to a hostname that does not exist, wait for that to fail, and then pass
+     * on the fallback: green, slow, and proving nothing about the call it was
+     * written for.
+     */
+    protected function transport(): ?callable
+    {
+        return null;
     }
 
     /**
@@ -344,12 +365,56 @@ class Server_Manager_Dashmox extends Server_Manager
     // doing nothing tells a host their customer's password changed when it did
     // not, which is worse than an error somebody can read.
 
-    public function getLoginUrl(?Server_Account $account): never
+    /**
+     * Where a host is sent when they press "Jump to admin".
+     *
+     * **Twice wrong before this.** It refused at first, on the reasoning that
+     * the panel minted no session so there was nothing to sign anybody in with,
+     * and a manager that pretends otherwise is worse than one that says no.
+     * That did not achieve the honesty it was for: FOSSBilling shows the button
+     * either way and swallows the exception, so a host pressed it and nothing
+     * happened at all. Then it returned the website's own /dashmox, which opens
+     * the panel's sign-in page and signs nobody in.
+     *
+     * The panel mints a one-time sign-on link now, so this asks for one. It
+     * lasts ninety seconds, is spent when opened, and lands in the website's own
+     * account, which reaches that one website.
+     *
+     * The plain link is still the answer when there is no sign-on to be had: a
+     * panel older than the feature, a token the operator did not give
+     * users.manage, or a website still being built. A sign-in page is a worse
+     * answer than a session and a much better one than a button that does
+     * nothing.
+     *
+     * Reseller sign-in still refuses, because there is no reseller role to
+     * send anybody to.
+     */
+    public function getLoginUrl(?Server_Account $account): string
     {
-        throw new Server_Exception(':type: does not support :action:', [
-            ':type:' => 'Dashmox',
-            ':action:' => 'signing a customer in from here. The panel mints no one-time session; every hosted domain answers /dashmox with a redirect to its sign-in page.',
-        ]);
+        $domain = $account?->getDomain();
+        if (!is_string($domain) || $domain === '') {
+            throw new Server_Exception(':type: does not support :action:', [
+                ':type:' => 'Dashmox',
+                ':action:' => 'opening the panel for an account with no domain. The panel is reached through the name of a website on it.',
+            ]);
+        }
+        $plain = 'https://' . $domain . '/dashmox';
+
+        try {
+            $panel = $this->panel();
+            $ids = $this->idsOf($account, $panel);
+            if ($ids['site_id'] === '') {
+                return $plain;
+            }
+            $url = $panel->signOn($ids['site_id'], 'FOSSBilling, from the admin area');
+
+            return $url !== null ? $url : $plain;
+        } catch (ApiError $e) {
+            // The button has one job and a panel that cannot be reached must not
+            // stop it doing the part that needs nothing: the sign-in page is
+            // served by the website, not by this call.
+            return $plain;
+        }
     }
 
     public function getResellerLoginUrl(?Server_Account $account): never

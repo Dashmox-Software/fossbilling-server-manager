@@ -119,6 +119,20 @@
         </div>
       </div>
 
+      {# The way in. The link behind this button is minted when it is pressed,
+         lives ninety seconds and is spent when opened, so there is nothing here
+         for a cached page to hand to somebody else. #}
+      <div class="card mb-4">
+        <div class="card-body d-flex flex-wrap align-items-center gap-3">
+          <a class="btn btn-primary" href="/dashmox/{{ order_id }}/open" rel="nofollow">
+            {{ 'Open my control panel'|trans }}
+          </a>
+          <span class="text-muted small mb-0">
+            {{ 'Files, databases, email, backups and certificates for this website.'|trans }}
+          </span>
+        </div>
+      </div>
+
       <div class="card mb-4">
         <div class="card-header"><h3 class="mb-0">{{ 'Details'|trans }}</h3></div>
         <div class="card-body">

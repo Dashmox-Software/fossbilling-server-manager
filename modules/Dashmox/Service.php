@@ -91,7 +91,52 @@ class Service implements \FOSSBilling\InjectionAwareInterface
             $view['problem'] = reset($view['unreadable']);
         }
 
+        // **The account name has to be the panel's, not FOSSBilling's.** Both
+        // systems hold one and they are different: FOSSBilling makes a username
+        // for its own bookkeeping when the order is placed, and the panel picks
+        // the Linux account when it builds the website. The page showed
+        // FOSSBilling's, so a customer reading it had a name that does not
+        // exist on the server, and the first thing they would do with it is try
+        // to sign in to file transfer. The panel calls it `account`.
+        if (is_array($view['site']) && !empty($view['site']['account'])) {
+            $view['username'] = (string) $view['site']['account'];
+        }
+
         return $view;
+    }
+
+    /**
+     * A one-time link that signs this customer into their panel.
+     *
+     * **It is minted when the button is pressed and never before.** It lives
+     * ninety seconds and is spent when opened, so a link put into the page the
+     * button is on would be dead by the time anybody clicked it, and a page
+     * holding a live credential is a page that must never be cached. The
+     * controller calls this and redirects, which means the link exists only in
+     * one redirect.
+     *
+     * Null when there is no sign-on to be had: a panel older than the feature,
+     * an integration key the operator did not give users.manage, a website
+     * still being built, or a panel that cannot be reached. The page offers the
+     * plain sign-in link in that case, which is what it offered before.
+     */
+    public function signOnUrl(\Model_ServiceHosting $service, string $requestedBy = ''): ?string
+    {
+        $domain = $service->sld . $service->tld;
+        try {
+            $panel = $this->panelFor($service);
+        } catch (\Exception $e) {
+            return null;
+        }
+        $siteId = $this->siteIdOf($panel, $domain);
+        if ($siteId === '') {
+            return null;
+        }
+        try {
+            return $panel->signOn($siteId, $requestedBy);
+        } catch (\Exception $e) {
+            return null;
+        }
     }
 
     /**

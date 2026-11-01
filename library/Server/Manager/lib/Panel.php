@@ -312,6 +312,59 @@ class Panel
     }
 
     /**
+     * A one-time link that signs this website's owner into the panel.
+     *
+     * **This is the only way most customers can get in.** The panel's customer
+     * record is created without a password, because a module that invented one
+     * would then have to deliver it, and the website's own account is created
+     * with no password either. So the "link to your panel" every one of these
+     * modules offers led to a sign-in page where the customer had no
+     * credentials. This is the credential.
+     *
+     * The link signs in as the website's own account, which reaches that one
+     * website and nothing else. It lives ninety seconds and is spent the moment
+     * it is opened, so it is minted when somebody presses the button rather than
+     * stored anywhere or put in a page that might be cached.
+     *
+     * $requestedBy is written into the panel's audit log as the claim it is: the
+     * panel cannot check it. Send whatever the billing system knows, so that an
+     * operator asking "who went in" gets an answer better than "the billing
+     * system".
+     *
+     * Null rather than an exception for the three refusals a caller can do
+     * something sensible about, because the fallback is a plain link to the
+     * sign-in page, and a page that will not draw is worse than a link that
+     * asks for a password. A 404 is a panel older than this feature, which is
+     * most of them for a while. A 403 is a token that was not given
+     * users.manage, which is the operator's switch for this and theirs to turn
+     * on. A 409 is a website still being built, which clears on its own.
+     */
+    public function signOn($siteId, $requestedBy = '')
+    {
+        // Null rather than an empty array, so no body is sent at all. An empty
+        // PHP array encodes as `[]`, not `{}`, and the panel decodes the body
+        // into an object: it would refuse the whole request as invalid JSON
+        // with nothing saying why. The panel accepts no body for exactly this.
+        $body = null;
+        if ($requestedBy !== '' && $requestedBy !== null) {
+            $body = ['requested_by' => (string) $requestedBy];
+        }
+        try {
+            $answer = $this->api->post(
+                '/api/v1/sites/' . rawurlencode($siteId) . '/sign-on',
+                $body
+            )['data'];
+        } catch (ApiError $e) {
+            if (in_array($e->getStatus(), [403, 404, 409], true)) {
+                return null;
+            }
+            throw $e;
+        }
+
+        return isset($answer['url']) && $answer['url'] !== '' ? $answer['url'] : null;
+    }
+
+    /**
      * The certificate a website is serving, or null when it has none.
      *
      * Null rather than an exception for the ordinary case: a website created a
@@ -372,10 +425,21 @@ class Panel
      */
     private function onlyCustomerFields(array $customer)
     {
-        return $this->only($customer, [
-            'name', 'email', 'company', 'phone', 'address', 'city', 'region',
-            'postal_code', 'country', 'notes', 'package_id',
-        ]);
+        // **A panel customer holds a name, an email address and notes.** It
+        // held a company, a phone number and a postal address until 2026-10-25,
+        // when the operator decided not to store that about anybody, and it
+        // refuses those fields now rather than throwing them away quietly.
+        //
+        // That refusal is right and it broke every order. A billing system
+        // always has a country for a client, so `createAccount` failed on its
+        // first call with "country would be thrown away rather than saved", and
+        // nothing was provisioned at all. Found by placing a real order through
+        // a real FOSSBilling install on 2026-11-01.
+        //
+        // They are dropped rather than folded into notes. Notes is a column in
+        // the same database, so moving a postal address there would store
+        // exactly what the panel decided not to store, under another name.
+        return $this->only($customer, ['name', 'email', 'notes', 'package_id']);
     }
 
     /**

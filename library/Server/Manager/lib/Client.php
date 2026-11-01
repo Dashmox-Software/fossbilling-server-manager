@@ -93,7 +93,7 @@ class Client
     /** @var callable|null Injected for tests; null means cURL. */
     private $transport;
 
-    public function __construct($base, $token, $verify = true, $timeout = 30, callable $transport = null)
+    public function __construct($base, $token, $verify = true, $timeout = 30, ?callable $transport = null)
     {
         $this->base = rtrim($base, '/');
         $this->token = $token;
@@ -107,22 +107,22 @@ class Client
         return $this->send('GET', $path, null, $query);
     }
 
-    public function post($path, array $body = null)
+    public function post($path, ?array $body = null)
     {
         return $this->send('POST', $path, $body);
     }
 
-    public function put($path, array $body = null)
+    public function put($path, ?array $body = null)
     {
         return $this->send('PUT', $path, $body);
     }
 
-    public function patch($path, array $body = null)
+    public function patch($path, ?array $body = null)
     {
         return $this->send('PATCH', $path, $body);
     }
 
-    public function delete($path, array $body = null)
+    public function delete($path, ?array $body = null)
     {
         return $this->send('DELETE', $path, $body);
     }
@@ -139,7 +139,7 @@ class Client
      *
      * @throws ApiError on any status of 400 or more.
      */
-    private function send($method, $path, array $body = null, array $query = [])
+    private function send($method, $path, ?array $body = null, array $query = [])
     {
         $url = $this->base . $path;
         if ($query) {

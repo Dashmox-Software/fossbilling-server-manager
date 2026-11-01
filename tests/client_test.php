@@ -233,6 +233,40 @@ check('fields the panel does not declare are not sent',
     array_key_exists('whmcs_client_id', $sent), false);
 check('fields it does declare are', $sent['email'], 'someone@example.com');
 
+// The seven fields a panel customer stopped holding on 2026-10-25. The panel
+// refuses them rather than ignoring them, which is right and which broke every
+// order: a billing system always has a country for a client, so creating the
+// customer failed on the first call of the first operation and nothing was
+// provisioned at all. Found by placing a real order through a real FOSSBilling
+// install, a week after the panel started refusing them.
+$seen = [];
+$panel = new Panel(new Client('https://p', 't', true, 30, recorder([
+    ['status' => 200, 'body' => '{"id":"c2","name":"Someone"}'],
+    ['status' => 202, 'body' => '{"site":{"id":"s2"},"job":{"id":"j2"}}'],
+], $seen)));
+$panel->createAccount(
+    [
+        'name' => 'Someone', 'email' => 'someone@example.com', 'notes' => 'order 7',
+        'company' => 'Acme', 'phone' => '555 0100', 'address' => '1 Example Road',
+        'city' => 'Sydney', 'region' => 'NS', 'postal_code' => 'B0E 1A0',
+        'country' => 'CA', 'package_id' => 'p1',
+    ],
+    ['name' => 'site', 'domain' => 'b.example.com']
+);
+$sent = json_decode($seen[0]['body'], true);
+foreach (['company', 'phone', 'address', 'city', 'region', 'postal_code', 'country'] as $retired) {
+    check($retired . ' is not sent to a panel that refuses it',
+        array_key_exists($retired, $sent), false);
+}
+check('and what the panel does hold still is',
+    [$sent['name'], $sent['email'], $sent['notes'], $sent['package_id']],
+    ['Someone', 'someone@example.com', 'order 7', 'p1']);
+// Not folded into notes either: notes is a column in the same database, so a
+// postal address moved there is the thing the panel decided not to store,
+// under another name.
+check('a postal address is dropped rather than moved into notes',
+    strpos((string) $sent['notes'], 'B0E 1A0'), false);
+
 // ---------------------------------------------------------------------------
 // Nothing measured is not the same as nothing used.
 // ---------------------------------------------------------------------------
@@ -391,6 +425,74 @@ checkThrows(
     function () use ($client) { (new Panel($client))->certificate('s1'); },
     function (ApiError $e) { return $e->getStatus() === 403; }
 );
+
+// -----------------------------------------------------------------------------
+// The one-time sign-on link.
+//
+// It is the only way most customers can reach the panel: the modules create a
+// customer with no password and the panel creates the website account with no
+// password, so the "link to your panel" they have always offered led to a
+// sign-in page where the customer had no credentials.
+
+$seen = [];
+$client = new Client('https://p', 't', true, 30, recorder([
+    ['status' => 201, 'body' => '{"url":"https://p/api/v1/sign-on?token=abc","expires_in":90}', 'headers' => []],
+], $seen));
+check('the link comes back as a url',
+    (new Panel($client))->signOn('s1', 'FOSSBilling client 41'),
+    'https://p/api/v1/sign-on?token=abc');
+check('asked of the website by id', $seen[0]['url'], 'https://p/api/v1/sites/s1/sign-on');
+check('as a POST, because it mints something', $seen[0]['method'], 'POST');
+check('and it passes on who asked, for the panel audit log',
+    json_decode((string) $seen[0]['body'], true), ['requested_by' => 'FOSSBilling client 41']);
+
+// Nothing to say means no body at all, not an empty one. An empty PHP array
+// encodes as `[]` rather than `{}`, and the panel decodes the body into an
+// object, so an empty array comes back as "invalid JSON request" with nothing
+// saying which field was wrong. This check is what found that.
+$seen = [];
+$client = new Client('https://p', 't', true, 30, recorder([
+    ['status' => 201, 'body' => '{"url":"https://p/api/v1/sign-on?token=abc"}', 'headers' => []],
+], $seen));
+(new Panel($client))->signOn('s1');
+check('with nothing to say, no body is sent', $seen[0]['body'], null);
+check('and no content type is claimed for it',
+    in_array('Content-Type: application/json', $seen[0]['headers'], true), false);
+
+// The three refusals a caller can do something sensible about read as null, so
+// a page can offer the plain sign-in link instead of failing to draw.
+foreach ([
+    404 => 'a panel older than the feature',
+    403 => 'an integration key without users.manage',
+    409 => 'a website still being built',
+] as $status => $what) {
+    $seen = [];
+    $client = new Client('https://p', 't', true, 30, recorder([
+        ['status' => $status, 'body' => '{"error":"no"}', 'headers' => []],
+    ], $seen));
+    check($what . ' reads as no link rather than an error',
+        (new Panel($client))->signOn('s1'), null);
+}
+
+// Everything else is still raised. A panel that answered 500 has a problem
+// somebody should hear about, and a quietly missing button hides it.
+$seen = [];
+$client = new Client('https://p', 't', true, 30, recorder([
+    ['status' => 500, 'body' => '{"error":"something broke"}', 'headers' => []],
+], $seen));
+checkThrows(
+    'any other refusal about a sign-on is still raised',
+    function () use ($client) { (new Panel($client))->signOn('s1'); },
+    function (ApiError $e) { return $e->getStatus() === 500; }
+);
+
+// A 201 with no url in it is a panel saying yes and handing over nothing, which
+// must not become the string "null" in a redirect.
+$seen = [];
+$client = new Client('https://p', 't', true, 30, recorder([
+    ['status' => 201, 'body' => '{"expires_in":90}', 'headers' => []],
+], $seen));
+check('a reply with no url reads as no link', (new Panel($client))->signOn('s1'), null);
 
 echo "\n$ran checks, $failures failed\n";
 exit($failures === 0 ? 0 : 1);

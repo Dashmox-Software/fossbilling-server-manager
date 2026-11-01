@@ -31,6 +31,30 @@ class Client extends \FOSSBilling\Api\AbstractApi
     }
 
     /**
+     * A one-time link into this customer's own panel.
+     *
+     * Minted here, on this server, with the server token, and handed back for
+     * one redirect. It lives ninety seconds and is spent when opened, so it is
+     * never stored and never rendered into a page: a page holding a live
+     * credential is a page that must not be cached, and this way there is
+     * nothing to cache.
+     *
+     * Null when the panel offers no sign-on, which the page turns into the
+     * plain link it offered before rather than an error.
+     */
+    public function signon($data)
+    {
+        $service = $this->_getService($data);
+        $identity = $this->getIdentity();
+        // What the panel writes into its audit log. It cannot check this, so it
+        // is a claim, but "client 41 from FOSSBilling" answers "who went in"
+        // and "the billing system" does not.
+        $who = 'FOSSBilling client ' . $identity->id;
+
+        return ['url' => $this->getService()->signOnUrl($service, $who)];
+    }
+
+    /**
      * This customer's own hosting service, or nothing.
      *
      * Order id and client id together. Checking the order and then trusting its

@@ -32,11 +32,14 @@ over a billing dispute. Terminating is the destructive one and says so.
   in the panel under **Server**, then **Integrations**.
 
 Grant the key these permissions: `customers.manage`, `sites.create`,
-`sites.view`, `sites.edit`, `sites.delete`, `server.view`, `ssl.view`.
+`sites.view`, `sites.edit`, `sites.delete`, `server.view`, `ssl.view`,
+`users.manage`.
 
 `ssl.view` is only for the certificate card on the customer's page. Leave it off
 and everything else still works; the card then says what is missing rather than
-showing nothing, which is how it was found. It reaches only the
+showing nothing, which is how it was found. `users.manage` is only for the
+sign on button below, and without it the button becomes a link to the panel's
+own sign in page. It reaches only the
 routes that name a permission it holds, so nothing else is open to it whatever
 else you tick.
 
@@ -85,16 +88,38 @@ One line in your theme's hosting page does it:
 <a href="/dashmox/{{ order.id }}">{{ 'Your website'|trans }}</a>
 ```
 
+## Signing your customer in
+
+A website sold through billing has no password anybody knows. The panel account
+is made by the integration key and nothing ever sets one on it, which is why
+there was no sign on button here before and why there is one now: the button
+does not carry a password, it carries a one time link the panel mints when the
+button is pressed. The link lives ninety seconds, is spent the moment it is
+opened, and signs that one customer into that one website.
+
+Your customer gets it in two places and you wire neither:
+
+* **FOSSBilling's own service page**, whose Login to Control Panel button calls
+  `getLoginUrl`, which is this manager.
+* **The module's page**, which has an Open my control panel button of its own.
+
+It needs a panel on **0.99.30 or newer** and a key holding `users.manage`.
+Without either, both buttons fall back to the panel's own sign in page, which is
+what they did before.
+
+The link is minted when the button is pressed and never earlier. One rendered
+into a page would be dead before anybody read the page, and a page holding a
+live credential is a page that must never be cached.
+
 ## What it cannot do, and why
 
-Five of the thirteen methods FOSSBilling defines have no route behind them on a
+Four of the thirteen methods FOSSBilling defines have no route behind them on a
 Dashmox panel. Each **refuses by name** rather than returning success, because a
 method that quietly does nothing tells you a customer's password changed when it
 did not.
 
 | Method | Why |
 | --- | --- |
-| `getLoginUrl` | No one time session is minted, so there is no "log in to your panel" |
 | `getResellerLoginUrl` | A licence covers a server, and there is no reseller role |
 | `changeAccountPassword` | The route exists and is deliberately closed to integration credentials |
 | `changeAccountUsername` | A website's Linux account name is fixed when it is created |
@@ -135,7 +160,7 @@ php tests/fossbilling_test.php
 ```
 
 `fossbilling_test.php` covers the manager's own logic: which fields it reads off
-a package, how it maps an account, and that the five unsupported methods refuse
+a package, how it maps an account, and that the four unsupported methods refuse
 rather than silently succeed.
 
 ## Support
